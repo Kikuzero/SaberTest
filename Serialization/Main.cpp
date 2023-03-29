@@ -12,18 +12,20 @@ struct ListNode
 	ListNode* Rand;
 };
 
-// List<> here because we can have multiple random connections to a single element
-// That's why in worst scenario this algorithm has time complexity of O(N^2)
-// in best (without any multiple random connection to a single element) O(N)
-typedef std::unordered_map<ListNode*, std::list<int>> SerializeStoreMap;
-typedef std::unordered_map<int, std::list<ListNode*>> DeserializeStoreMap;
-
 typedef std::fstream FileStream;
 
 struct SerializeStruct {
 	std::string data = "";
-	int forward = -1;
-	int backward = -1;
+	int random = -1;
+};
+
+typedef std::unordered_map<ListNode*, int> SerializeMarkupAssociation;
+typedef std::unordered_map<int, ListNode*> DeserializeMarkupAssociation;
+
+struct DeserializeInit
+{
+	std::vector<SerializeStruct> vec;
+	DeserializeMarkupAssociation dma;
 };
 
 class ListRand
@@ -45,143 +47,106 @@ public:
 		return Tail;
 	}
 
-	// Forward step checks forward Rand connections of Nodes
-	std::vector<SerializeStruct> SerializeForwardSteps() {
-		ListNode* fCurrent = Head;
+	// Weight exploit
+	// Mark up all nodes for quick access to element indexes from their refs
+	SerializeMarkupAssociation MarkupAllNodes() {
+		auto current = Head;
+		SerializeMarkupAssociation ma;
 
-		SerializeStoreMap store;
-		std::vector<SerializeStruct> vec(Count);
-
-		ListNode* rand;
 		for (int i = 0; i < Count; i++) {
-			rand = fCurrent->Rand;
-			if (rand != nullptr) {
-				if (store.find(rand) != store.end()) {
-					store.at(rand).push_back(i);
-				}
-				else {
-					store.insert(SerializeStoreMap::value_type(rand, std::list<int>{ i }));
-				}
-			}
-			if (store.find(fCurrent) != store.end()) {
-				auto li = store.at(fCurrent);
-				for (auto el : li) {
-					vec.at(el).forward = i;
-				}
-				store.erase(fCurrent);
-			}
-			vec.at(i).data = fCurrent->Data;
-			fCurrent = fCurrent->Next;
+			ma.insert(SerializeMarkupAssociation::value_type(current, i));
+			current = current->Next;
 		}
 
-		return vec;
+		delete current;
+
+		return ma;
 	}
 
-	// Backward step checks backward Rand connections of Nodes
-	std::vector<SerializeStruct> SerializeBackwardSteps(std::vector<SerializeStruct> vec) {
-		ListNode* bCurrent = Tail;
+	std::vector<SerializeStruct> SerializeSteps(SerializeMarkupAssociation ma) {
+		auto current = Head;
+		std::vector<SerializeStruct> vec(Count);
 
-		SerializeStoreMap store;
-
-		ListNode* rand;
-		for (int i = Count - 1; i >= 0; i--) {
-			rand = bCurrent->Rand;
-			if (rand != nullptr) {
-				if (store.find(rand) != store.end()) {
-					store.at(rand).push_back(i);
-				}
-				else {
-					store.insert(SerializeStoreMap::value_type(rand, std::list<int>{ i }));
-				}
+		ListNode* random;
+		for (int i = 0; i < Count; i++) {
+			random = current->Rand;
+			if (random != nullptr) {
+				vec.at(i).random = ma.at(random);
 			}
-			if (store.find(bCurrent) != store.end()) {
-				auto li = store.at(bCurrent);
-				for (auto el : li) {
-					vec.at(el).backward = i;
-				}
-				store.erase(bCurrent);
-			}
-			vec.at(i).data = bCurrent->Data;
-			bCurrent = bCurrent->Prev;
+			vec.at(i).data = current->Data;
+			current = current->Next;
 		}
+
+		delete current;
 
 		return vec;
 	}
 
 	void Serialize(std::fstream& f) {
-		std::vector<SerializeStruct> vec = SerializeBackwardSteps(SerializeForwardSteps());
+		auto ma = MarkupAllNodes();
+		std::vector<SerializeStruct> vec = SerializeSteps(ma);
 
 		int size = vec.size();
 		f << size << " ";
 
 		for (auto el : vec) {
-			f << el.data << " " << el.forward << " " << el.backward << " ";
+			f << el.data << " " << el.random << " ";
 		}
 	}
 
-	std::vector<SerializeStruct> InitDeserizlizeSteps(std::fstream& f) {
+	DeserializeInit InitDeserializeSteps(FileStream& f) {
 		int size;
 		f >> size;
 		std::vector<SerializeStruct> vec(size);
-	
+		DeserializeMarkupAssociation dma;
+
 		std::string data;
-		int forward, backward;
+		int random;
+		// Another weight exploit
+		// Mark up all nodes for quick access to element refs from their indexes
 		for (int i = 0; i < size; i++) {
-			f >> data >> forward >> backward;
-			AddNew(data);
-			vec.at(i) = { data, forward, backward };
+			f >> data >> random;
+			dma.insert(DeserializeMarkupAssociation::value_type(i, AddNew(data)));
+			vec.at(i) = { data, random };
 		}
 
-		return vec;
+		return { vec, dma };
 	}
 
-	void Deserialize(std::fstream& f) {
-		std::vector<SerializeStruct> vec = InitDeserizlizeSteps(f);
+	void Deserialize(FileStream& f) {
+		auto initStruct = InitDeserializeSteps(f);
+		auto vec = initStruct.vec;
+		auto dma = initStruct.dma;
 		auto size = vec.size();
 
-		DeserializeStoreMap fStore;
-		DeserializeStoreMap bStore;
+		ListNode* current = Head;
 
-		ListNode* fCurrent = Head;
-		ListNode* bCurrent = Tail;
-
-		//Forward steps of deserialization
-		int forward;
+		int random;
 		for (int i = 0; i < size; i++) {
-			forward = vec.at(i).forward;
-			if (forward != -1) {
-				if (fStore.find(forward) != fStore.end()) 
-					fStore.at(forward).push_back(fCurrent);
-				else 
-					fStore.insert(DeserializeStoreMap::value_type(forward, std::list<ListNode*>{fCurrent}));
+			random = vec.at(i).random;
+			if (random != -1) {
+				current->Rand = dma.at(random);
 			}
-			if (fStore.find(i) != fStore.end()) {
-				auto li = fStore.at(i);
-				for (auto el : li) 	el->Rand = fCurrent;
-				fStore.erase(i);
-			}
-			fCurrent = fCurrent->Next;
+			current = current->Next;
 		}
 
-		//Backward steps of deserialization
-		int backward;
-		for (int i = size - 1; i >= 0; i--) {
-			backward = vec.at(i).backward;
-			if (backward != -1) {
-				if (bStore.find(backward) != bStore.end())
-					bStore.at(backward).push_back(bCurrent);
-				else
-					bStore.insert(DeserializeStoreMap::value_type(backward, std::list<ListNode*>{bCurrent}));
-			}
-			if (bStore.find(i) != bStore.end()) {
-				auto li = bStore.at(i);
-				for (auto el : li) 	el->Rand = bCurrent;
-				bStore.erase(i);
-			}
-			bCurrent = bCurrent->Prev;
-		}
+		delete current;
 	}
 
+	~ListRand() {
+		if (Count == 0) return;
+
+		auto current = Head;
+		ListNode* nextCurrent = nullptr;
+		for (int i = 0; i < Count; i++) {
+			nextCurrent = current->Next;
+			delete current;
+			current = nextCurrent;
+		}
+
+		delete current;
+		delete nextCurrent;
+	}
 private:
 	ListNode* Head;
 	ListNode* Tail;
@@ -196,8 +161,7 @@ int main() {
 	li.Deserialize(s);
 	s.close();
 
-	s.open("file1.txt");
-	s.clear();
+	s.open("file1.txt", std::ofstream::out | std::ofstream::trunc);
 	li.Serialize(s);
 	s.close();
 
